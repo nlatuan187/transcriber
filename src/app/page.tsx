@@ -68,7 +68,7 @@ export default function Home() {
 
         let responseText = "";
 
-        // ALWAYS USE RESUMABLE UPLOAD (Bypass Vercel 4.5MB limit entirely)
+        // ALWAYS USE RESUMABLE UPLOAD VIA PROXY (Bypass Vercel 4.5MB limit & CORS)
         setStatusText(`Initializing safe upload for ${file.name}...`);
 
         try {
@@ -94,29 +94,45 @@ export default function Home() {
           }
           const { uploadUrl } = await initRes.json();
 
-          // 2. Upload directly to Gemini
-          setStatusText(`Uploading ${file.name} to Gemini... (0%)`);
+          // 2. Upload CHUNKS via Proxy
+          const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB per chunk (Safe for Vercel's 4.5MB limit)
+          const totalSize = file.size;
+          let offset = 0;
+          let fileUri = null;
 
-          const xhr = new XMLHttpRequest();
-          await new Promise((resolve, reject) => {
-            xhr.open("PUT", uploadUrl);
-            xhr.setRequestHeader("Content-Type", distinctMimeType);
-            xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
-                const percentComplete = Math.round((e.loaded / e.total) * 100);
-                setStatusText(`Uploading ${file.name} to Gemini... (${percentComplete}%)`);
-              }
-            };
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
-              else reject(new Error(`Direct Upload failed (${xhr.status}): ${xhr.statusText}`));
-            };
-            xhr.onerror = () => reject(new Error("Network error during upload (CORS or Connection Drop)"));
-            xhr.send(file);
-          });
+          while (offset < totalSize) {
+            const chunk = file.slice(offset, offset + CHUNK_SIZE);
+            const formData = new FormData();
+            formData.append("chunk", chunk);
+            formData.append("uploadUrl", uploadUrl);
+            formData.append("offset", offset.toString());
+            formData.append("totalSize", totalSize.toString());
 
-          const uploadResponse = JSON.parse(xhr.response);
-          const fileUri = uploadResponse.file.uri;
+            const percentStart = Math.round((offset / totalSize) * 100);
+            const percentEnd = Math.round(((offset + chunk.size) / totalSize) * 100);
+            setStatusText(`Uploading ${file.name}... (${percentEnd}%)`);
+
+            const chunkRes = await fetch("/api/upload/chunk", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!chunkRes.ok) {
+              const text = await chunkRes.text();
+              throw new Error(`Chunk upload failed: ${text}`);
+            }
+
+            const chunkData = await chunkRes.json();
+
+            if (chunkData.status === "finalized") {
+              fileUri = chunkData.file.uri;
+              break;
+            }
+
+            offset += CHUNK_SIZE;
+          }
+
+          if (!fileUri) throw new Error("Upload incomplete or failed to get File URI");
 
           // 3. Transcribe using File URI
           setStatusText(`Analyzing content of ${file.name}...`);
@@ -215,7 +231,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.3</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.4</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
