@@ -68,38 +68,50 @@ export default function Home() {
 
         let responseText = "";
 
-        if (file.size > 4 * 1024 * 1024) {
-          // LARGE FILE FLOW (> 4MB)
-          setStatusText(`[Large File] Initializing upload for ${file.name}...`);
+        // ALWAYS USE RESUMABLE UPLOAD (Bypass Vercel 4.5MB limit entirely)
+        setStatusText(`Initializing safe upload for ${file.name}...`);
+
+        try {
+          // 0. Robust MIME type detection
+          let distinctMimeType = file.type;
+          if (!distinctMimeType || distinctMimeType === "application/octet-stream") {
+            if (file.name.toLowerCase().endsWith(".pdf")) distinctMimeType = "application/pdf";
+            else if (file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg")) distinctMimeType = "image/jpeg";
+            else if (file.name.toLowerCase().endsWith(".png")) distinctMimeType = "image/png";
+          }
+          if (!distinctMimeType) distinctMimeType = "application/pdf";
 
           // 1. Get Upload URL
           const initRes = await fetch("/api/upload/init", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mimeType: file.type, displayName: file.name })
+            body: JSON.stringify({ mimeType: distinctMimeType, displayName: file.name })
           });
 
-          if (!initRes.ok) throw new Error("Failed to initiate large file upload");
+          if (!initRes.ok) {
+            const text = await initRes.text();
+            throw new Error(`Init failed (${initRes.status}): ${text}`);
+          }
           const { uploadUrl } = await initRes.json();
 
           // 2. Upload directly to Gemini
-          setStatusText(`[Large File] Uploading ${file.name} to Gemini... (0%)`);
+          setStatusText(`Uploading ${file.name} to Gemini... (0%)`);
 
           const xhr = new XMLHttpRequest();
           await new Promise((resolve, reject) => {
             xhr.open("PUT", uploadUrl);
-            xhr.setRequestHeader("Content-Type", file.type);
+            xhr.setRequestHeader("Content-Type", distinctMimeType);
             xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
                 const percentComplete = Math.round((e.loaded / e.total) * 100);
-                setStatusText(`[Large File] Uploading ${file.name} to Gemini... (${percentComplete}%)`);
+                setStatusText(`Uploading ${file.name} to Gemini... (${percentComplete}%)`);
               }
             };
             xhr.onload = () => {
               if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
-              else reject(new Error(`Upload failed: ${xhr.statusText}`));
+              else reject(new Error(`Direct Upload failed (${xhr.status}): ${xhr.statusText}`));
             };
-            xhr.onerror = () => reject(new Error("Network error during upload"));
+            xhr.onerror = () => reject(new Error("Network error during upload (CORS or Connection Drop)"));
             xhr.send(file);
           });
 
@@ -107,44 +119,20 @@ export default function Home() {
           const fileUri = uploadResponse.file.uri;
 
           // 3. Transcribe using File URI
-          setStatusText(`[Large File] Analyzing ${file.name}...`);
+          setStatusText(`Analyzing content of ${file.name}...`);
           const transcribeRes = await fetch("/api/transcribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileUri, mimeType: file.type, apiKey, modelName })
+            body: JSON.stringify({ fileUri, mimeType: distinctMimeType, apiKey, modelName })
           });
 
           const data = await transcribeRes.json();
           if (!transcribeRes.ok) throw new Error(data.error || "Transcription failed");
           responseText = data.text;
 
-        } else {
-          // SMALL FILE FLOW (<= 4MB) - Keep existing logic for speed
-          const formData = new FormData();
-          formData.append("apiKey", apiKey);
-          formData.append("modelName", modelName);
-          formData.append("files", file);
-
-          console.log(`Sending file ${i + 1}/${files.length} to /api/transcribe...`);
-
-          const res = await fetch("/api/transcribe", {
-            method: "POST",
-            body: formData,
-          });
-
-          let data;
-          const contentType = res.headers.get("content-type");
-          if (contentType && contentType.indexOf("application/json") !== -1) {
-            data = await res.json();
-          } else {
-            const text = await res.text();
-            throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}...`);
-          }
-
-          if (!res.ok) {
-            throw new Error(data.error || `Failed to transcribe ${file.name}`);
-          }
-          responseText = data.text;
+        } catch (err: any) {
+          console.error(err);
+          throw new Error(`Process failed: ${err.message}`);
         }
 
         // accumulate text
@@ -227,7 +215,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.2</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.3</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
