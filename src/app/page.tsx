@@ -66,38 +66,89 @@ export default function Home() {
         const file = files[i];
         setStatusText(`Processing file ${i + 1} of ${files.length}: ${file.name}...`);
 
+        let responseText = "";
+
         if (file.size > 4 * 1024 * 1024) {
-          throw new Error(`File ${file.name} is too large (>4MB). Vercel Serverless Functions have a 4.5MB payload limit.`);
-        }
+          // LARGE FILE FLOW (> 4MB)
+          setStatusText(`[Large File] Initializing upload for ${file.name}...`);
 
-        const formData = new FormData();
-        formData.append("apiKey", apiKey);
-        formData.append("modelName", modelName);
-        formData.append("files", file); // Send only ONE file
+          // 1. Get Upload URL
+          const initRes = await fetch("/api/upload/init", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mimeType: file.type, displayName: file.name })
+          });
 
-        console.log(`Sending file ${i + 1}/${files.length} to /api/transcribe...`);
+          if (!initRes.ok) throw new Error("Failed to initiate large file upload");
+          const { uploadUrl } = await initRes.json();
 
-        const res = await fetch("/api/transcribe", {
-          method: "POST",
-          body: formData,
-        });
+          // 2. Upload directly to Gemini
+          setStatusText(`[Large File] Uploading ${file.name} to Gemini... (0%)`);
 
-        let data;
-        const contentType = res.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-          data = await res.json();
+          const xhr = new XMLHttpRequest();
+          await new Promise((resolve, reject) => {
+            xhr.open("PUT", uploadUrl);
+            xhr.setRequestHeader("Content-Type", file.type);
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                const percentComplete = Math.round((e.loaded / e.total) * 100);
+                setStatusText(`[Large File] Uploading ${file.name} to Gemini... (${percentComplete}%)`);
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+              else reject(new Error(`Upload failed: ${xhr.statusText}`));
+            };
+            xhr.onerror = () => reject(new Error("Network error during upload"));
+            xhr.send(file);
+          });
+
+          const uploadResponse = JSON.parse(xhr.response);
+          const fileUri = uploadResponse.file.uri;
+
+          // 3. Transcribe using File URI
+          setStatusText(`[Large File] Analyzing ${file.name}...`);
+          const transcribeRes = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileUri, mimeType: file.type, apiKey, modelName })
+          });
+
+          const data = await transcribeRes.json();
+          if (!transcribeRes.ok) throw new Error(data.error || "Transcription failed");
+          responseText = data.text;
+
         } else {
-          const text = await res.text();
-          throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}...`);
-        }
+          // SMALL FILE FLOW (<= 4MB) - Keep existing logic for speed
+          const formData = new FormData();
+          formData.append("apiKey", apiKey);
+          formData.append("modelName", modelName);
+          formData.append("files", file);
 
-        if (!res.ok) {
-          throw new Error(data.error || `Failed to transcribe ${file.name}`);
+          console.log(`Sending file ${i + 1}/${files.length} to /api/transcribe...`);
+
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            body: formData,
+          });
+
+          let data;
+          const contentType = res.headers.get("content-type");
+          if (contentType && contentType.indexOf("application/json") !== -1) {
+            data = await res.json();
+          } else {
+            const text = await res.text();
+            throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}...`);
+          }
+
+          if (!res.ok) {
+            throw new Error(data.error || `Failed to transcribe ${file.name}`);
+          }
+          responseText = data.text;
         }
 
         // accumulate text
-        const fileText = data.text || "";
-        accumulatedText += fileText + "\n\n"; // Add spacing
+        accumulatedText += responseText + "\n\n"; // Add spacing
 
         // Update UI immediately
         setTranscribedText(accumulatedText);
