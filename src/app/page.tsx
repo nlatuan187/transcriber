@@ -66,6 +66,10 @@ export default function Home() {
         const file = files[i];
         setStatusText(`Processing file ${i + 1} of ${files.length}: ${file.name}...`);
 
+        if (file.size > 4 * 1024 * 1024) {
+          throw new Error(`File ${file.name} is too large (>4MB). Vercel Serverless Functions have a 4.5MB payload limit.`);
+        }
+
         const formData = new FormData();
         formData.append("apiKey", apiKey);
         formData.append("modelName", modelName);
@@ -78,7 +82,14 @@ export default function Home() {
           body: formData,
         });
 
-        const data = await res.json();
+        let data;
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          data = await res.json();
+        } else {
+          const text = await res.text();
+          throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}...`);
+        }
 
         if (!res.ok) {
           throw new Error(data.error || `Failed to transcribe ${file.name}`);
