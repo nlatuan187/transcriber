@@ -68,8 +68,10 @@ export default function Home() {
 
         let responseText = "";
 
-        // ALWAYS USE RESUMABLE UPLOAD VIA PROXY (Bypass Vercel 4.5MB limit & CORS)
-        setStatusText(`Initializing safe upload for ${file.name}...`);
+        // ALWAYS USE DIRECT CLIENT-SIDE RESUMABLE UPLOAD (v1.6)
+        // Bypass Vercel limits by going direct to Google.
+        // Adhere to Gemini's strict 8MB (8,388,608 bytes) chunk granularity.
+        setStatusText(`Initializing robust upload for ${file.name}...`);
 
         try {
           // 0. Robust MIME type detection
@@ -94,45 +96,64 @@ export default function Home() {
           }
           const { uploadUrl } = await initRes.json();
 
-          // 2. Upload CHUNKS via Proxy
-          const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB per chunk (Safe for Vercel's 4.5MB limit)
+          // 2. Upload Directly to Gemini with Strict Chunking
+          // Gemini REQUIRES chunks to be multiples of 256KiB. Recommended is 8MB.
+          const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB
           const totalSize = file.size;
           let offset = 0;
           let fileUri = null;
 
           while (offset < totalSize) {
             const chunk = file.slice(offset, offset + CHUNK_SIZE);
-            const formData = new FormData();
-            formData.append("chunk", chunk);
-            formData.append("uploadUrl", uploadUrl);
-            formData.append("offset", offset.toString());
-            formData.append("totalSize", totalSize.toString());
+            const isLastChunk = offset + chunk.size >= totalSize;
+
+            // CRITICAL: Headers for Gemini Resumable Protocol
+            const uploadCommand = isLastChunk ? "upload, finalize" : "upload";
 
             const percentStart = Math.round((offset / totalSize) * 100);
             const percentEnd = Math.round(((offset + chunk.size) / totalSize) * 100);
             setStatusText(`Uploading ${file.name}... (${percentEnd}%)`);
 
-            const chunkRes = await fetch("/api/upload/chunk", {
-              method: "POST",
-              body: formData,
+            const xhr = new XMLHttpRequest();
+            await new Promise((resolve, reject) => {
+              xhr.open("PUT", uploadUrl);
+
+              xhr.setRequestHeader("Content-Length", chunk.size.toString());
+              xhr.setRequestHeader("X-Goog-Upload-Offset", offset.toString());
+              xhr.setRequestHeader("X-Goog-Upload-Command", uploadCommand);
+              // Content-Type is NOT required for chunks, but good to be safe or leave empty.
+
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  // Calculates progress within this chunk
+                }
+              };
+
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  if (isLastChunk) {
+                    const response = JSON.parse(xhr.response);
+                    fileUri = response.file.uri;
+                  }
+                  resolve(null);
+                } else {
+                  // Gemini might return 308 Resume Incomplete, which is success for chunks
+                  if (xhr.status === 308) {
+                    resolve(null);
+                  } else {
+                    reject(new Error(`Chunk upload failed (${xhr.status}): ${xhr.statusText}`));
+                  }
+                }
+              };
+              xhr.onerror = () => reject(new Error("Network error during chunk upload"));
+
+              xhr.send(chunk);
             });
-
-            if (!chunkRes.ok) {
-              const text = await chunkRes.text();
-              throw new Error(`Chunk upload failed: ${text}`);
-            }
-
-            const chunkData = await chunkRes.json();
-
-            if (chunkData.status === "finalized") {
-              fileUri = chunkData.file.uri;
-              break;
-            }
 
             offset += CHUNK_SIZE;
           }
 
-          if (!fileUri) throw new Error("Upload incomplete or failed to get File URI");
+          if (!fileUri) throw new Error("Upload finalized but no File URI returned");
 
           // 3. Transcribe using File URI
           setStatusText(`Analyzing content of ${file.name}...`);
@@ -231,7 +252,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.5</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.6</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
