@@ -21,11 +21,15 @@ export async function POST(req: NextRequest) {
 
         console.log(`Proxying chunk: ${start}-${end}/${totalSize} to Gemini...`);
 
+        const uploadCommand = isLastChunk ? "upload, finalize" : "upload";
+
         const geminiRes = await fetch(uploadUrl, {
             method: "PUT",
             headers: {
                 "Content-Length": chunk.size.toString(),
                 "Content-Range": `bytes ${start}-${end}/${totalSize}`,
+                "X-Goog-Upload-Command": uploadCommand,
+                "X-Goog-Upload-Offset": offset,
             },
             body: arrayBuffer,
         });
