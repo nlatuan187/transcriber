@@ -11,6 +11,8 @@ export async function POST(req: NextRequest) {
         }
 
         // 1. Initiate Resumable Upload
+        const origin = req.headers.get("origin") || ""; // Crucial for CORS
+
         const initRes = await fetch(
             `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
             {
@@ -21,6 +23,7 @@ export async function POST(req: NextRequest) {
                     "X-Goog-Upload-Header-Content-Length": "",
                     "X-Goog-Upload-Header-Content-Type": mimeType,
                     "Content-Type": "application/json",
+                    "Origin": origin, // <--- THE KEY FIX: Propagate the Origin so Google knows who will upload
                 },
                 body: JSON.stringify({
                     file: {
