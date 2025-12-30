@@ -1,10 +1,10 @@
-
 "use client";
 
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, FileText, X, Check, Download, Loader2, Settings2 } from "lucide-react";
 import { Document, Packer, Paragraph, TextRun } from "docx";
+import { PDFDocument } from "pdf-lib";
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
@@ -16,21 +16,76 @@ export default function Home() {
   const [suggestedFilename, setSuggestedFilename] = useState("transcription");
   const [showSettings, setShowSettings] = useState(false);
 
+  // Helper: Split large PDFs into chunks of 20 pages
+  const splitLargePdf = async (file: File): Promise<File[]> => {
+    if (file.type !== "application/pdf") return [file];
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const pageCount = pdfDoc.getPageCount();
+      const CHUNK_SIZE = 20;
+
+      if (pageCount <= CHUNK_SIZE) return [file];
+
+      setStatusText(`Splitting large PDF (${pageCount} pages)...`);
+      const chunks: File[] = [];
+      const totalChunks = Math.ceil(pageCount / CHUNK_SIZE);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, pageCount);
+
+        const subDoc = await PDFDocument.create();
+        const indices = Array.from({ length: end - start }, (_, k) => start + k);
+        const copiedPages = await subDoc.copyPages(pdfDoc, indices);
+        copiedPages.forEach((page) => subDoc.addPage(page));
+
+        const pdfBytes = await subDoc.save();
+        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        const chunkName = `${file.name.replace(".pdf", "")}_part${i + 1}.pdf`;
+        chunks.push(new File([blob], chunkName, { type: "application/pdf" }));
+      }
+      return chunks;
+    } catch (e) {
+      console.error("PDF Split Error", e);
+      return [file]; // Fallback if split fails
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     if (e.dataTransfer.files) {
-      setFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+      const incomingFiles = Array.from(e.dataTransfer.files);
+      const processedFiles: File[] = [];
+
+      for (const file of incomingFiles) {
+        const splits = await splitLargePdf(file);
+        processedFiles.push(...splits);
+      }
+
+      setFiles((prev) => [...prev, ...processedFiles]);
+      setStatusText(""); // Clear "Splitting..." status
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (fileList) {
-      setFiles((prev) => [...prev, ...Array.from(fileList)]);
+      const incomingFiles = Array.from(fileList);
+      const processedFiles: File[] = [];
+
+      for (const file of incomingFiles) {
+        const splits = await splitLargePdf(file);
+        processedFiles.push(...splits);
+      }
+
+      setFiles((prev) => [...prev, ...processedFiles]);
+      setStatusText(""); // Clear "Splitting..." status
     }
   };
 
@@ -180,6 +235,12 @@ export default function Home() {
 
         // Update UI immediately
         setTranscribedText(accumulatedText);
+
+        // RATE LIMITING (v2.0): Prevent "Too Many Requests" by delaying next file
+        if (i < files.length - 1) {
+          setStatusText(`Cooling down (Rate Limit Prevention)...`);
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
 
       // Auto-generate filename using AI
@@ -255,7 +316,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v1.9</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.0</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
