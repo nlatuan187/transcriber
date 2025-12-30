@@ -24,7 +24,7 @@ export default function Home() {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       const pageCount = pdfDoc.getPageCount();
-      const CHUNK_SIZE = 20;
+      const CHUNK_SIZE = 4;
 
       if (pageCount <= CHUNK_SIZE) return [file];
 
@@ -42,7 +42,7 @@ export default function Home() {
         copiedPages.forEach((page) => subDoc.addPage(page));
 
         const pdfBytes = await subDoc.save();
-        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        const blob = new Blob([pdfBytes as any], { type: "application/pdf" });
         const chunkName = `${file.name.replace(".pdf", "")}_part${i + 1}.pdf`;
         chunks.push(new File([blob], chunkName, { type: "application/pdf" }));
       }
@@ -316,7 +316,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.0</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.1</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
