@@ -16,7 +16,7 @@ export default function Home() {
   const [suggestedFilename, setSuggestedFilename] = useState("transcription");
   const [showSettings, setShowSettings] = useState(false);
 
-  // Helper: Split large PDFs into chunks of 20 pages
+  // Helper: Split large PDFs into chunks of 4 pages (v2.1)
   const splitLargePdf = async (file: File): Promise<File[]> => {
     if (file.type !== "application/pdf") return [file];
 
@@ -24,7 +24,7 @@ export default function Home() {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       const pageCount = pdfDoc.getPageCount();
-      const CHUNK_SIZE = 4;
+      const CHUNK_SIZE = 4; // v2.1: Safe small chunk size to avoid Recitation
 
       if (pageCount <= CHUNK_SIZE) return [file];
 
@@ -236,10 +236,10 @@ export default function Home() {
         // Update UI immediately
         setTranscribedText(accumulatedText);
 
-        // RATE LIMITING (v2.0): Prevent "Too Many Requests" by delaying next file
+        // RATE LIMITING (v2.2): Optimized for Paid Tier (0.5s delay)
         if (i < files.length - 1) {
           setStatusText(`Cooling down (Rate Limit Prevention)...`);
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 500));
         }
       }
 
@@ -316,7 +316,7 @@ export default function Home() {
       <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
         <div>
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.1</span>
+            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.2</span>
           </h1>
           <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
         </div>
