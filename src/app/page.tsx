@@ -24,7 +24,7 @@ export default function Home() {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       const pageCount = pdfDoc.getPageCount();
-      const CHUNK_SIZE = 4; // v2.1: Safe small chunk size to avoid Recitation
+      const CHUNK_SIZE = 10; // v2.3: Optimized for Flash Models (1M Context / 65k Output)
 
       if (pageCount <= CHUNK_SIZE) return [file];
 
