@@ -9,7 +9,7 @@ import { PDFDocument } from "pdf-lib";
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [apiKey, setApiKey] = useState("");
-  const [modelName, setModelName] = useState("gemini-3-pro-preview");
+  const [modelName, setModelName] = useState("");
   const [transcribedText, setTranscribedText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusText, setStatusText] = useState("");
@@ -215,7 +215,12 @@ export default function Home() {
           const transcribeRes = await fetch("/api/transcribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileUri, mimeType: distinctMimeType, apiKey, modelName })
+            body: JSON.stringify({
+              fileUri,
+              mimeType: distinctMimeType,
+              apiKey,
+              ...(modelName ? { modelName } : {})
+            })
           });
 
           const data = await transcribeRes.json();
