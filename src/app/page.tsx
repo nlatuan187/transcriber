@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, X, Check, Download, Loader2, Settings2 } from "lucide-react";
+import { Upload, FileText, X, Check, Download, Loader2, Settings2, Copy } from "lucide-react";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { PDFDocument } from "pdf-lib";
 
@@ -17,6 +17,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [modelUsed, setModelUsed] = useState("");
   const [wasFallback, setWasFallback] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Helper: Split large PDFs into chunks of 4 pages (v2.1)
   const splitLargePdf = async (file: File): Promise<File[]> => {
@@ -493,12 +494,29 @@ export default function Home() {
                   </span>
                 )}
                 {transcribedText && (
-                  <button
-                    onClick={downloadDocx}
-                    className="ml-auto flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-300 rounded-xl hover:bg-green-500/30 font-semibold text-sm transition-colors border border-green-500/30"
-                  >
-                    <Download size={16} /> Lưu .docx
-                  </button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(transcribedText);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      title="Sao chép nội dung"
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all border ${copied
+                          ? "bg-blue-500/30 text-blue-200 border-blue-400/40"
+                          : "bg-white/10 text-white/60 hover:bg-white/15 hover:text-white/80 border-white/10"
+                        }`}
+                    >
+                      {copied ? <Check size={16} /> : <Copy size={16} />}
+                      {copied ? "Đã copy!" : "Copy"}
+                    </button>
+                    <button
+                      onClick={downloadDocx}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-300 rounded-xl hover:bg-green-500/30 font-semibold text-sm transition-colors border border-green-500/30"
+                    >
+                      <Download size={16} /> Lưu .docx
+                    </button>
+                  </div>
                 )}
               </div>
 
