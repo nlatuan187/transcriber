@@ -7,18 +7,18 @@ export async function POST(req: NextRequest) {
         const { text, apiKey } = await req.json();
 
         if (!text) {
-            return NextResponse.json({ error: "No text provided" }, { status: 400 });
+            return NextResponse.json({ error: "Không có văn bản được cung cấp" }, { status: 400 });
         }
 
-        // Use environment API Key if client doesn't provide one
+        // Dùng API Key từ môi trường nếu client không cung cấp
         const finalApiKey = process.env.GEMINI_API_KEY || apiKey;
 
         if (!finalApiKey) {
-            return NextResponse.json({ error: "API Key required" }, { status: 400 });
+            return NextResponse.json({ error: "Yêu cầu API Key" }, { status: 400 });
         }
 
         const genAI = new GoogleGenerativeAI(finalApiKey);
-        // Use Flash for speed and cost effectiveness
+        // Dùng Flash để tăng tốc độ và tiết kiệm chi phí
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ title });
     } catch (error: any) {
-        console.error("Title generation error:", error);
-        return NextResponse.json({ title: "transcription" }); // Fallback
+        console.error("Lỗi tạo tiêu đề:", error);
+        return NextResponse.json({ title: "phien_am" }); // Dự phòng
     }
 }

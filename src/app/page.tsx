@@ -13,8 +13,10 @@ export default function Home() {
   const [transcribedText, setTranscribedText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusText, setStatusText] = useState("");
-  const [suggestedFilename, setSuggestedFilename] = useState("transcription");
+  const [suggestedFilename, setSuggestedFilename] = useState("phien_am");
   const [showSettings, setShowSettings] = useState(false);
+  const [modelUsed, setModelUsed] = useState("");
+  const [wasFallback, setWasFallback] = useState(false);
 
   // Helper: Split large PDFs into chunks of 4 pages (v2.1)
   const splitLargePdf = async (file: File): Promise<File[]> => {
@@ -28,7 +30,7 @@ export default function Home() {
 
       if (pageCount <= CHUNK_SIZE) return [file];
 
-      setStatusText(`Splitting large PDF (${pageCount} pages)...`);
+      setStatusText(`Đang chia nhỏ PDF lớn (${pageCount} trang)...`);
       const chunks: File[] = [];
       const totalChunks = Math.ceil(pageCount / CHUNK_SIZE);
 
@@ -48,8 +50,8 @@ export default function Home() {
       }
       return chunks;
     } catch (e) {
-      console.error("PDF Split Error", e);
-      return [file]; // Fallback if split fails
+      console.error("Lỗi chia nhỏ PDF", e);
+      return [file]; // Dự phòng nếu chia thất bại
     }
   };
 
@@ -104,14 +106,14 @@ export default function Home() {
 
   const processFiles = async () => {
     if (files.length === 0) {
-      alert("Please upload at least one file.");
+      alert("Vui lòng tải lên ít nhất một file.");
       return;
     }
 
     setIsProcessing(true);
     setTranscribedText(""); // Clear previous text
-    setStatusText("Initializing...");
-    setSuggestedFilename("transcription"); // Reset filename
+    setStatusText("Đang khởi tạo...");
+    setSuggestedFilename("phien_am"); // Đặt lại tên file
 
     try {
       let accumulatedText = "";
@@ -119,14 +121,14 @@ export default function Home() {
       // Process files sequentially
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setStatusText(`Processing file ${i + 1} of ${files.length}: ${file.name}...`);
+        setStatusText(`Đang xử lý file ${i + 1}/${files.length}: ${file.name}...`);
 
         let responseText = "";
 
         // ALWAYS USE DIRECT CLIENT-SIDE RESUMABLE UPLOAD (v1.6)
         // Bypass Vercel limits by going direct to Google.
         // Adhere to Gemini's strict 8MB (8,388,608 bytes) chunk granularity.
-        setStatusText(`Initializing robust upload for ${file.name}...`);
+        setStatusText(`Đang khởi tạo tải lên cho ${file.name}...`);
 
         try {
           // 0. Robust MIME type detection
@@ -167,7 +169,7 @@ export default function Home() {
 
             const percentStart = Math.round((offset / totalSize) * 100);
             const percentEnd = Math.round(((offset + chunk.size) / totalSize) * 100);
-            setStatusText(`Uploading ${file.name}... (${percentEnd}%)`);
+            setStatusText(`Đang tải lên ${file.name}... (${percentEnd}%)`);
 
             const xhr = new XMLHttpRequest();
             await new Promise((resolve, reject) => {
@@ -196,11 +198,11 @@ export default function Home() {
                   if (xhr.status === 308) {
                     resolve(null);
                   } else {
-                    reject(new Error(`Chunk upload failed (${xhr.status}): ${xhr.statusText}`));
+                    reject(new Error(`Tải lên thất bại (${xhr.status}): ${xhr.statusText}`));
                   }
                 }
               };
-              xhr.onerror = () => reject(new Error("Network error during chunk upload"));
+              xhr.onerror = () => reject(new Error("Lỗi mạng khi tải lên"));
 
               xhr.send(chunk);
             });
@@ -208,10 +210,10 @@ export default function Home() {
             offset += CHUNK_SIZE;
           }
 
-          if (!fileUri) throw new Error("Upload finalized but no File URI returned");
+          if (!fileUri) throw new Error("Tải lên hoàn tất nhưng không nhận được URI file");
 
           // 3. Transcribe using File URI
-          setStatusText(`Analyzing content of ${file.name}...`);
+          setStatusText(`Đang phân tích nội dung ${file.name}...`);
           const transcribeRes = await fetch("/api/transcribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -224,12 +226,18 @@ export default function Home() {
           });
 
           const data = await transcribeRes.json();
-          if (!transcribeRes.ok) throw new Error(data.error || "Transcription failed");
+          if (!transcribeRes.ok) throw new Error(data.error || "Phiên dịch thất bại");
           responseText = data.text;
+
+          // Cập nhật thông tin model đã dùng (lấy từ lần cuối cùng thành công)
+          if (data.modelUsed) {
+            setModelUsed(data.modelUsed);
+            setWasFallback(!!data.wasFallback);
+          }
 
         } catch (err: any) {
           console.error(err);
-          throw new Error(`Process failed: ${err.message}`);
+          throw new Error(`Xử lý thất bại: ${err.message}`);
         }
 
         // accumulate text
@@ -243,14 +251,14 @@ export default function Home() {
 
         // RATE LIMITING (v2.2): Optimized for Paid Tier (0.5s delay)
         if (i < files.length - 1) {
-          setStatusText(`Cooling down (Rate Limit Prevention)...`);
+          setStatusText(`Đang chờ (Tránh giới hạn tốc độ)...`);
           await new Promise(r => setTimeout(r, 500));
         }
       }
 
       // Auto-generate filename using AI
       if (accumulatedText.trim().length > 0) {
-        setStatusText("Generating smart filename...");
+        setStatusText("Đang tạo tên file thông minh...");
         try {
           const titleRes = await fetch("/api/generate-title", {
             method: "POST",
@@ -262,14 +270,14 @@ export default function Home() {
             setSuggestedFilename(titleData.title);
           }
         } catch (e) {
-          console.error("Failed to generate title", e);
+          console.error("Tạo tiêu đề thất bại", e);
         }
       }
 
-      setStatusText("Done!");
+      setStatusText("Hoàn thành!");
     } catch (error: any) {
       console.error("Frontend process error:", error);
-      alert("Error: " + error.message);
+      alert("Lỗi: " + error.message);
     } finally {
       setIsProcessing(false);
       setStatusText("");
@@ -297,7 +305,7 @@ export default function Home() {
       const blob = await Packer.toBlob(doc);
 
       // Use the smart filename if available, else default
-      const fileName = suggestedFilename ? `${suggestedFilename}.docx` : "transcription.docx";
+      const fileName = suggestedFilename ? `${suggestedFilename}.docx` : "phien_am.docx";
 
       // Create download link manually
       const url = window.URL.createObjectURL(blob);
@@ -309,29 +317,28 @@ export default function Home() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      console.error("Error generating document:", error);
-      alert("Failed to generate document.");
+      console.error("Lỗi tạo tài liệu:", error);
+      alert("Không thể tạo tài liệu.");
     }
   };
 
   return (
-    <main className="min-h-screen p-8 flex flex-col items-center max-w-5xl mx-auto space-y-8 font-sans">
+    <main className="min-h-screen flex flex-col items-center font-sans" style={{ background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #0f0f1a 100%)" }}>
 
-      {/* Header */}
-      <header className="w-full flex justify-between items-center pb-6 border-b border-white/10">
+      {/* Top bar */}
+      <div className="w-full border-b border-white/10 px-6 py-4 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 flex items-center gap-3">
-            Gemini Transcriber <span className="text-xs bg-white/10 text-white/50 px-2 py-1 rounded-full border border-white/10">v2.2</span>
-          </h1>
-          <p className="text-white/60 mt-2">Transcribe Images & PDFs to Word with AI</p>
+          <span className="text-lg font-bold text-white">Công cụ trích xuất văn bản</span>
+          <span className="ml-2 text-xs bg-white/10 text-white/40 px-2 py-0.5 rounded-full"></span>
         </div>
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="p-2 rounded-full glass glass-hover text-white/70"
+          title="Cài đặt nâng cao"
+          className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg transition-colors ${showSettings ? "bg-blue-500/20 text-blue-300 border border-blue-400/30" : "bg-white/5 text-white/50 border border-white/10 hover:bg-white/10"}`}
         >
-          <Settings2 size={24} />
+          <Settings2 size={14} /> Cài đặt
         </button>
-      </header>
+      </div>
 
       {/* Settings Panel */}
       <AnimatePresence>
@@ -340,142 +347,206 @@ export default function Home() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="w-full overflow-hidden"
+            className="w-full overflow-hidden border-b border-white/10 bg-white/3"
           >
-            <div className="glass p-6 rounded-2xl grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-white/70 font-medium">Google Gemini API Key</label>
+            <div className="max-w-2xl mx-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5 font-medium">Google Gemini API Key</label>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Leave empty to use server env variable..."
-                  className="w-full p-3 rounded-xl glass-input"
+                  placeholder="Để trống để dùng key mặc định của server..."
+                  className="w-full px-3 py-2 rounded-lg text-sm glass-input"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm text-white/70 font-medium">Model Name</label>
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5 font-medium">Tên Model AI <span className="text-white/30">(tuỳ chọn)</span></label>
                 <input
                   type="text"
                   value={modelName}
                   onChange={(e) => setModelName(e.target.value)}
-                  placeholder="e.g., gemini-1.5-pro, gemini-3.0"
-                  className="w-full p-3 rounded-xl glass-input"
+                  placeholder="Ví dụ: gemini-1.5-pro"
+                  className="w-full px-3 py-2 rounded-lg text-sm glass-input"
                 />
-                <p className="text-xs text-white/40">Enter exact model string (e.g. gemini-1.5-pro)</p>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Main Content Grid */}
-      <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-8 h-full flex-grow">
+      {/* Main content */}
+      <div className="w-full max-w-2xl mx-auto px-5 py-8 flex flex-col gap-6">
 
-        {/* Left: Upload & File Management */}
-        <section className="space-y-4 flex flex-col">
+        {/* Step 1: Upload */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
+            <span className="text-sm font-semibold text-white/80">Chọn file cần trích xuất</span>
+          </div>
           <div
             onDragOver={handleDragOver}
             onDrop={handleDrop}
-            className="border-2 border-dashed border-white/20 rounded-3xl p-10 flex flex-col items-center justify-center text-center transition-colors hover:border-blue-500/50 hover:bg-white/5 cursor-pointer min-h-[200px]"
-            onClick={() => document.getElementById('fileInput')?.click()}
+            onClick={() => document.getElementById("fileInput")?.click()}
+            className="border-2 border-dashed border-blue-400/30 rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all hover:border-blue-400/60 hover:bg-blue-400/5 active:scale-[0.99]"
           >
-            <Upload size={48} className="text-blue-400 mb-4" />
-            <p className="text-xl font-medium">Drop files here</p>
-            <p className="text-sm text-white/50 mt-1">Images (JPG, PNG) or PDFs</p>
-            <input
-              id="fileInput"
-              type="file"
-              multiple
-              className="hidden"
-              accept="image/*,application/pdf"
-              onChange={handleFileSelect}
-            />
+            <div className="w-14 h-14 rounded-xl bg-blue-500/15 border border-blue-400/20 flex items-center justify-center mb-3">
+              <Upload size={28} className="text-blue-400" />
+            </div>
+            <p className="font-semibold text-white text-base">Nhấn vào đây để chọn file</p>
+            <p className="text-white/40 text-sm mt-1">hoặc kéo thả file vào đây</p>
+            <div className="flex gap-2 mt-4">
+              {["📄 PDF", "🖼 JPG", "🖼 PNG"].map(t => (
+                <span key={t} className="text-xs bg-white/8 text-white/50 px-3 py-1 rounded-full border border-white/10">{t}</span>
+              ))}
+            </div>
+            <input id="fileInput" type="file" multiple className="hidden" accept="image/*,application/pdf" onChange={handleFileSelect} />
           </div>
+        </div>
 
-          <div className="glass rounded-3xl p-6 flex-grow flex flex-col space-y-4">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <FileText size={20} className="text-purple-400" />
-              Files Queue ({files.length})
-            </h3>
-
-            <div className="flex-grow overflow-y-auto space-y-2 max-h-[400px] pr-2">
-              <AnimatePresence>
+        {/* File list */}
+        <AnimatePresence>
+          {files.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-full bg-purple-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">✓</span>
+                <span className="text-sm font-semibold text-white/80">File đã chọn</span>
+                <span className="ml-auto text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-400/30">{files.length} file</span>
+              </div>
+              <div className="rounded-2xl border border-white/10 overflow-hidden divide-y divide-white/5">
                 {files.map((file, index) => (
                   <motion.div
                     key={`${file.name}-${index}`}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="flex justify-between items-center bg-white/5 p-3 rounded-xl hover:bg-white/10 transition-colors group"
+                    className="flex items-center gap-3 px-4 py-3 bg-white/3 hover:bg-white/6 transition-colors group"
                   >
-                    <div className="flex items-center gap-3 overflow-hidden">
-                      <span className="text-xs font-mono bg-white/10 px-2 py-1 rounded">{index + 1}</span>
-                      <span className="truncate text-sm text-white/80">{file.name}</span>
-                    </div>
+                    <span className="text-xs text-white/30 w-5 text-center flex-shrink-0">{index + 1}</span>
+                    <FileText size={14} className="text-purple-400 flex-shrink-0" />
+                    <span className="text-sm text-white/70 truncate flex-1">{file.name}</span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={(e) => { e.stopPropagation(); moveFile(index, -1) }} className="p-1 hover:text-blue-400" disabled={index === 0}>↑</button>
-                      <button onClick={(e) => { e.stopPropagation(); moveFile(index, 1) }} className="p-1 hover:text-blue-400" disabled={index === files.length - 1}>↓</button>
-                      <button onClick={(e) => { e.stopPropagation(); removeFile(index) }} className="p-1 hover:text-red-400"><X size={16} /></button>
+                      <button title="Lên" onClick={(e) => { e.stopPropagation(); moveFile(index, -1); }} disabled={index === 0} className="p-1 text-white/30 hover:text-blue-400 disabled:opacity-20 text-base leading-none">↑</button>
+                      <button title="Xuống" onClick={(e) => { e.stopPropagation(); moveFile(index, 1); }} disabled={index === files.length - 1} className="p-1 text-white/30 hover:text-blue-400 disabled:opacity-20 text-base leading-none">↓</button>
+                      <button title="Xoá" onClick={(e) => { e.stopPropagation(); removeFile(index); }} className="p-1 text-white/30 hover:text-red-400 ml-1">
+                        <X size={14} />
+                      </button>
                     </div>
                   </motion.div>
                 ))}
-              </AnimatePresence>
-              {files.length === 0 && (
-                <p className="text-center text-white/30 py-10 italic">No files added yet.</p>
-              )}
-            </div>
-
-            <button
-              onClick={processFiles}
-              disabled={isProcessing || files.length === 0}
-              className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all
-                ${isProcessing || files.length === 0 ? 'bg-white/10 text-white/30 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:shadow-lg hover:shadow-purple-500/30 active:scale-95'}
-              `}
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="animate-spin" style={{ animation: "spin 1s linear infinite" }} />
-                  <style jsx global>{`
-                    @keyframes spin {
-                      from { transform: rotate(0deg); }
-                      to { transform: rotate(360deg); }
-                    }
-                  `}</style>
-                  {statusText || "Processing..."}
-                </>
-              ) : (
-                <> <Check /> Start Transcription </>
-              )}
-            </button>
-          </div>
-        </section>
-
-        {/* Right: Results */}
-        <section className="glass rounded-3xl p-8 flex flex-col h-full min-h-[500px]">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-2xl font-bold">Output</h3>
-            {transcribedText && (
-              <button
-                onClick={downloadDocx}
-                className="px-4 py-2 bg-green-500/20 text-green-400 rounded-lg hover:bg-green-500/30 flex items-center gap-2 font-medium transition-colors"
-              >
-                <Download size={18} /> Save .docx
-              </button>
-            )}
-          </div>
-
-          <div className="bg-black/30 w-full flex-grow rounded-xl p-6 overflow-y-auto border border-white/5 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-            {transcribedText ? (
-              transcribedText
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-white/20">
-                <FileText size={64} className="mb-4 opacity-50" />
-                <p>Transcription results will appear here.</p>
               </div>
-            )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Step 2: Big Action Button */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center flex-shrink-0 ${files.length > 0 ? "bg-blue-500" : "bg-white/20"}`}>2</span>
+            <span className="text-sm font-semibold text-white/80">Bắt đầu trích xuất</span>
           </div>
-        </section>
+          <button
+            onClick={processFiles}
+            disabled={isProcessing || files.length === 0}
+            className={`w-full py-5 rounded-2xl font-bold text-xl flex items-center justify-center gap-3 transition-all select-none
+              ${isProcessing
+                ? "bg-blue-600/40 text-blue-200 cursor-not-allowed"
+                : files.length === 0
+                  ? "bg-white/8 text-white/25 cursor-not-allowed border-2 border-dashed border-white/15"
+                  : "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl shadow-purple-900/40 hover:shadow-purple-900/60 hover:scale-[1.01] active:scale-[0.99]"
+              }`}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 size={24} style={{ animation: "spin 1s linear infinite" }} />
+                <style jsx global>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                <span>{statusText || "Đang xử lý..."}</span>
+              </>
+            ) : files.length === 0 ? (
+              <span className="text-base">← Hãy chọn file ở bước 1 trước</span>
+            ) : (
+              <>
+                <Check size={24} />
+                <span>Bắt đầu Phiên dịch ({files.length} file)</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Step 3: Result */}
+        <AnimatePresence>
+          {(transcribedText || isProcessing) && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-6 h-6 rounded-full bg-green-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
+                <span className="text-sm font-semibold text-white/80">Kết quả</span>
+                {/* Badge model đang dùng */}
+                {modelUsed && (
+                  <span
+                    title={wasFallback ? "Model dự phòng được dùng do server quá tải" : "Model chính đang hoạt động bình thường"}
+                    className={`ml-1 text-xs px-2 py-0.5 rounded-full border font-mono flex items-center gap-1 cursor-default ${wasFallback
+                      ? "bg-amber-500/15 text-amber-300 border-amber-400/30"
+                      : "bg-green-500/15 text-green-300 border-green-400/30"
+                      }`}
+                  >
+                    {wasFallback ? "⚠️" : "✓"} {modelUsed}
+                  </span>
+                )}
+                {transcribedText && (
+                  <button
+                    onClick={downloadDocx}
+                    className="ml-auto flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-300 rounded-xl hover:bg-green-500/30 font-semibold text-sm transition-colors border border-green-500/30"
+                  >
+                    <Download size={16} /> Lưu .docx
+                  </button>
+                )}
+              </div>
+
+              {/* Banner cảnh báo khi dùng model dự phòng */}
+              {transcribedText && wasFallback && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-400/25 flex items-start gap-2.5"
+                >
+                  <span className="text-amber-400 text-base flex-shrink-0 mt-0.5">⚠️</span>
+                  <div className="text-xs text-amber-200/80 leading-relaxed">
+                    <span className="font-semibold text-amber-300">Server model chính bị quá tải</span> — Kết quả này được xử lý bằng{" "}
+                    <span className="font-mono text-amber-200">{modelUsed}</span> (model dự phòng).{" "}
+                    Chất lượng có thể thấp hơn so với model chính. Nếu kết quả chưa đúng ý, hãy thử lại sau vài phút.
+                  </div>
+                </motion.div>
+              )}
+
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-5 min-h-[200px] max-h-[500px] overflow-y-auto font-mono text-sm text-white/80 leading-relaxed whitespace-pre-wrap">
+                {transcribedText || (
+                  <div className="flex items-center gap-3 text-white/40 pt-4">
+                    <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                    <span>{statusText || "Đang xử lý..."}</span>
+                  </div>
+                )}
+              </div>
+              {transcribedText && !isProcessing && (
+                <p className="text-center text-xs text-white/30 mt-2">✅ Hoàn tất — Nhấn "Lưu .docx" để tải về</p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+
+        {/* FAQ nhỏ gọn */}
+        <details className="group mt-2">
+          <summary className="text-xs text-white/30 cursor-pointer hover:text-white/50 transition-colors select-none flex items-center gap-1">
+            <span className="group-open:rotate-90 inline-block transition-transform">▶</span>
+            Câu hỏi thường gặp
+          </summary>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-white/40">
+            <div><span className="text-white/60 font-medium">File nào được hỗ trợ?</span><br />Hình ảnh JPG, PNG và file PDF.</div>
+            <div><span className="text-white/60 font-medium">Mất bao lâu?</span><br />10–60 giây tuỳ kích thước file. Đừng đóng trang.</div>
+            <div><span className="text-white/60 font-medium">File .docx là gì?</span><br />File Word, mở được bằng Microsoft Word hoặc Google Docs.</div>
+            <div><span className="text-white/60 font-medium">Dữ liệu có bị lưu không?</span><br />Không. File chỉ gửi đến AI để đọc chữ, không lưu lại.</div>
+          </div>
+        </details>
 
       </div>
     </main>
